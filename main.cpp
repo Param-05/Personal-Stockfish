@@ -2,6 +2,7 @@
 #include <vector>
 #include <string>
 #include <set>
+#include <algorithm>
 using namespace std;
 
 /*
@@ -55,16 +56,18 @@ struct Move
     Color color;         // Color of the piece
     pair<int, int> from; // Starting position (row, col)
     pair<int, int> to;   // Ending position (row, col)
+    Piece promotedPiece; // Added for promotion
 
-    Move(Piece p, Color c, pair<int, int> f, pair<int, int> t)
-        : piece(p), color(c), from(f), to(t) {}
-
-    // Optional: Define comparison operator for sorting/uniqueness
+    Move(Piece p, Color c, pair<int, int> f, pair<int, int> t, Piece promo = EMPTY)
+        : piece(p), color(c), from(f), to(t), promotedPiece(promo) {}
+    // Define comparison operator for sorting/uniqueness
     bool operator<(const Move &other) const
     {
         if (from != other.from)
             return from < other.from;
-        return to < other.to;
+        if (to != other.to)
+            return to < other.to;
+        return promotedPiece < other.promotedPiece; // Include promotedPiece in comparison
     }
 };
 
@@ -73,6 +76,8 @@ class ChessBoard
 {
 private:
     vector<vector<Square>> board;
+    vector<Move> moveHistory;
+    pair<int, int> enPassantTarget; // Track en passant square
 
 public:
     ChessBoard()
@@ -151,36 +156,85 @@ public:
         }
         return square.color == BLACK ? tolower(pieceChar) : pieceChar;
     }
-    // Pseudo-legal moves generation for each piece type
+    // legal moves generation for each piece type
 
     void generatePawnMoves(set<Move> &moves, int row, int col, Color color)
-{
-    int direction = (color == WHITE) ? -1 : 1;
-    
-    // Forward movement
-    if (board[row + direction][col].piece == EMPTY)
     {
-        moves.insert(Move(PAWN, color, {row, col}, {row + direction, col}));
-        if ((color == WHITE && row == 6) || (color == BLACK && row == 1))
+        int direction = (color == WHITE) ? -1 : 1;
+        int newRow = row + direction;
+
+        // Forward moves
+        if (newRow >= 0 && newRow < 8 && board[newRow][col].piece == EMPTY)
         {
-            if (board[row + 2 * direction][col].piece == EMPTY)
+            bool isPromotion = (color == WHITE && newRow == 0) || (color == BLACK && newRow == 7);
+            if (isPromotion)
             {
-                moves.insert(Move(PAWN, color, {row, col}, {row + 2 * direction, col}));
+                vector<Piece> promotions = {QUEEN, ROOK, BISHOP, KNIGHT};
+                for (Piece promo : promotions)
+                {
+                    moves.insert(Move(PAWN, color, {row, col}, {newRow, col}, promo));
+                }
+            }
+            else
+            {
+                moves.insert(Move(PAWN, color, {row, col}, {newRow, col}));
+                // Double step
+                if ((color == WHITE && row == 6) || (color == BLACK && row == 1))
+                {
+                    int doubleRow = row + 2 * direction;
+                    if (doubleRow >= 0 && doubleRow < 8 && board[doubleRow][col].piece == EMPTY)
+                    {
+                        moves.insert(Move(PAWN, color, {row, col}, {doubleRow, col}));
+                    }
+                }
+            }
+        }
+
+        // Captures
+        for (int dcol : {-1, 1})
+        {
+            int targetCol = col + dcol;
+            if (targetCol < 0 || targetCol >= 8)
+                continue;
+
+            Square target = board[newRow][targetCol];
+            if (target.color != color && target.color != NONE)
+            {
+                bool isPromotion = (color == WHITE && newRow == 0) || (color == BLACK && newRow == 7);
+                if (isPromotion)
+                {
+                    vector<Piece> promotions = {QUEEN, ROOK, BISHOP, KNIGHT};
+                    for (Piece promo : promotions)
+                    {
+                        moves.insert(Move(PAWN, color, {row, col}, {newRow, targetCol}, promo));
+                    }
+                }
+                else
+                {
+                    moves.insert(Move(PAWN, color, {row, col}, {newRow, targetCol}));
+                }
+            }
+        }
+
+        // En Passant
+        if (enPassantTarget.first != -1)
+        {
+            int epRow = enPassantTarget.first;
+            int epCol = enPassantTarget.second;
+            if ((color == WHITE && row == 3) || (color == BLACK && row == 4))
+            {
+                if (epRow == newRow && abs(epCol - col) == 1)
+                {
+                    int enemyRow = (color == WHITE) ? epRow + 1 : epRow - 1;
+                    Square &enemy = board[enemyRow][epCol];
+                    if (enemy.piece == PAWN && enemy.color != color)
+                    {
+                        moves.insert(Move(PAWN, color, {row, col}, {epRow, epCol}));
+                    }
+                }
             }
         }
     }
-
-    // Capture diagonally
-    if (col - 1 >= 0 && board[row + direction][col - 1].color != color && board[row + direction][col - 1].piece != EMPTY)
-    {
-        moves.insert(Move(PAWN, color, {row, col}, {row + direction, col - 1}));
-    }
-    if (col + 1 < 8 && board[row + direction][col + 1].color != color && board[row + direction][col + 1].piece != EMPTY)
-    {
-        moves.insert(Move(PAWN, color, {row, col}, {row + direction, col + 1}));
-    }
-}
-
 
     void generateKnightMoves(set<Move> &moves, int row, int col, Color color)
     {
